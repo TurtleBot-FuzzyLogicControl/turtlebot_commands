@@ -1,35 +1,38 @@
-from __future__ import print_function
 import numpy as np
-# from create_env import TurtleBot_ROS
+import fuzzyOutputs as fuzzy
 
-class Movement:
+class FuzzyImplementation:
 
-    def __init__(self, goal_position):
+    def __init__(self, goal):
 
-        self.lin_velo_x = 0.2
-        self.lin_velo_y = 0.2
-        self.ang_velo_z = 0.2
-        self.goal = goal_position
+        self.goal = goal
 
-    def align_heading(self, current_pos):
+    def getOdometryErrors(self, current_pos, current_orientation):
 
-        est_dist = np.sqrt((self.goal[0] - current_pos[0])**2 + (self.goal[1] - current_pos[1])**2)
-        est_angle  = np.arctan2((self.goal[1] - current_pos[1]), (self.goal[0] - current_pos[0]))
-        return  est_dist, est_angle
+        # current position in meters and angular deviation between the current heading of the robot and the line joining the current position and goal
+
+        dist = np.sqrt((self.goal[0] - current_pos[0])**2 + (self.goal[1] - current_pos[1])**2)
+        angle  = np.arctan2((self.goal[1] - current_pos[1]), (self.goal[0] - current_pos[0]))*180/np.pi
+        angle_deviation = -(current_orientation - angle)
+
+        return  dist, angle_deviation
 
     def membership_functions_TFLC(self, dist, angle_dev):
 
-        # Distance - Zero:z, Very Near: vn, Near:n, Mid-way:m, Far:f, Very Far:vf
-        mem_dist = {'z': 0.4, 'vn':0.5, 'n':0.6, 'm':0.8, 'f':1.0, 'vf':1.3}
-        mem_dist_keys = ['z', 'vn', 'n', 'm', 'f', 'vf']
+        # Distance - Zero:z, Very Near: vn, Near:n, Mid-way:m, Far:f
+        mem_dist = {'z': 0.1, 'n':1.0, 'f':2.0}
+        mem_dist_keys = ['z', 'n', 'f']
 
-        # Angular Position - Neg Opp: no, Neg Right-Angled: nr, Neg Thirty: nt, Neg Five:nf, Aligned: a
-        #                    Pos Five:rf, Pos Thirty: rt, Pos Right-Angled: rr, Pos Opp: ro
-        mem_angle_dev = {'no': -180, 'nr': -90, 'nt': -30, 'nf': -5, 'a': 0, 'rf': 5, 'rt':30, 'rr':90, 'ro':180}
-        mem_angle_dev_keys = ['no', 'nr', 'nt', 'nf', 'a', 'rf', 'rt', 'rr', 'ro']
+        # Angular Position - Neg Right-Angled: nr, Neg Thirty: nt, Aligned: a
+        #                    Pos Thirty: rt, Pos Right-Angled: rr
+        mem_angle_dev = {'nr': -90, 'nt': -30, 'a': 0, 'rt':30, 'rr':90}
+        mem_angle_dev_keys = ['nr', 'nt', 'a', 'rt', 'rr']
 
         nan = 'nan'
         # print (dist, angle_dev)
+
+        TFLC_dict_dist = {'z': 0.0, 'n': 0.0, 'f': 0.0}
+        TFLC_dict_angle = {'nr': 0.0, 'nt': 0.0, 'a': 0.0, 'rt':0.0, 'rr':0.0}
 
         def membership_dist():
 
@@ -38,16 +41,15 @@ class Movement:
 
             for index, key in enumerate(mem_dist_keys):
 
-                # print ("Index", index)
-                # print ("Key", key)
-                # print("Mem val", mem_dist[key])
-
                 if index==0 and dist <= mem_dist[key]:
-                    return 1, key, nan
-                elif index== lenL-1 and dist>mem_dist[mem_dist_keys[lenL-1]]:
-                    return 1, mem_dist_keys[lenL-1], nan
+                    TFLC_dict_dist[key] = 1.0
+                elif index == lenL-1 and dist>mem_dist[mem_dist_keys[lenL-1]]:
+                    TFLC_dict_dist[mem_dist_keys[lenL-1]] = 1.0
                 elif dist<=mem_dist[key] and dist>mem_dist[prev_key]:
-                    return ((dist - mem_dist[prev_key]) / (mem_dist[key] - mem_dist[prev_key])), key, prev_key
+                    w = ((dist - mem_dist[prev_key]) / (float)(mem_dist[key] - mem_dist[prev_key]))
+                    TFLC_dict_dist[key] = w
+                    TFLC_dict_dist[prev_key] = 1.0-w
+
                 prev_key = key
 
         def membership_angle():
@@ -57,85 +59,122 @@ class Movement:
 
             for index, key in enumerate(mem_angle_dev_keys):
 
-                # print ("Index", index)
-                # print ("Key", key)
-                # print("Mem val", mem_angle[key])
-
                 if index==0 and angle_dev <= mem_angle_dev[key]:
-                    return 1, key, nan
+                    TFLC_dict_angle[key] = 1.0
                 elif index == lenLL-1 and angle_dev>mem_angle_dev[mem_angle_dev_keys[lenLL-1]]:
-                    return 1, mem_angle_dev_keys[lenLL-1], nan
+                    TFLC_dict_angle[mem_angle_dev_keys[lenLL-1]] = 1.0
                 elif angle_dev<=mem_angle_dev[key] and angle_dev>mem_angle_dev[pprev_key]:
-                    return ((angle_dev-mem_angle_dev[pprev_key])/float(mem_angle_dev[key] - mem_angle_dev[pprev_key])), key, pprev_key
+                    w = ((angle_dev-mem_angle_dev[pprev_key])/(float)(mem_angle_dev[key] - mem_angle_dev[pprev_key]))
+                    TFLC_dict_angle[key] = w
+                    TFLC_dict_angle[pprev_key] = 1.0-w
+
                 pprev_key = key
 
-        mdd = membership_dist()
-        maa = membership_angle()
+        membership_dist()
+        membership_angle()
 
-        # print ("Membership function for distance", mdd)
-        # print ("Membership function for angle", maa)
+        # print TFLC_dict_dist
+        # print TFLC_dict_angle
 
-        return mdd, maa
+        # Linear Velocity: 0, low, high
+        TFLC_linVelDict = {'z': 0.0, 'l': 0.2, 'h': 0.4}
+        TFLC_linV_keys = ['z', 'l', 'h']
 
-    def membership_functions_OAFLC(self, obs_dist, obs_angle):
+        # Angular Velocity:  -high, -low, 0, low, high
+        TFLC_angVelDict = {'nh': -0.2, 'nl': -0.1, 'z': 0, 'pl':0.1, 'ph': 0.2}
+        TFLC_angV_keys = ['nh', 'nl', 'z', 'pl', 'ph']
 
-        # Distance - Zero:z, Near:n, Mid-way:m, Far:f, Very Far:vf
-        mem_obs_dist = {'z': 0.4, 'n':0.6, 'm':0.8, 'f':1.0, 'vf':1.3}
-        mem_obs_dist_keys = ['z', 'n', 'm', 'f', 'vf']
+        # nr - z,n,f | nt - z,n,f | a - z,n,f | rt - z,n,f | rr - z,n,f
+        # Each is a tuple with linear velocity and angular velocity
+        TFLC_VelocityValues = []
 
-        # Angular Position - Left max: lm, LeftA: la, LeftB: lb, LeftC:lc, LeftD: ld, Zero: z
-        #                    RightD: rd, RightC:rc, RightB: rb, RightA: ra, Right max: rm
-        mem_obs_angle_dev = {'lm':-30, 'la':-24, 'lb':-18, 'lc':-12, 'ld': -6, 'z': 0, 'rd':6, 'rc':12, 'rb':18, 'ra':24, 'rm':30}
-        mem_obs_angle_dev_keys = ['lm','la','lb','lc','ld','z','rd','rc','rb','ra','rm']
+        for angKey in TFLC_angV_keys:
+            for linKey in TFLC_linV_keys:
+                TFLC_VelocityValues.append([TFLC_linVelDict[linKey], TFLC_angVelDict[angKey]])
+
+        count = -1
+        weight_sum, linearVelocity_sum, angularVelocity_sum = 0.0, 0.0, 0.0
+
+        for ang_dev_key in mem_angle_dev_keys:
+            for dist_key in mem_dist_keys:
+                count += 1
+                weii = min(TFLC_dict_angle[ang_dev_key], TFLC_dict_dist[dist_key])
+                weight_sum += weii
+                linearVelocity_sum += TFLC_VelocityValues[count][0]*weii
+                angularVelocity_sum += TFLC_VelocityValues[count][1]*weii
+
+        linearVelocity = linearVelocity_sum/weight_sum
+        angularVelocity = angularVelocity_sum/weight_sum
+
+        return linearVelocity, angularVelocity
+
+
+    def membership_functions_OAFLC(self, obs_values):
+
+        # Distance - Very Near:vn, Near:n, Far:f
+        mem_obs_dist = {'vn': 0.6, 'n':1.5, 'f':3.0}
+        mem_obs_dist_keys = ['vn', 'n', 'f']
 
         nan = 'nan'
 
         # print (obs_dist, obs_angle)
 
-        def membership_obs_dist():
+        def membership_obs_dist(value):
 
             prev_key = None
             lenL = len(mem_obs_dist_keys)
 
             for index, key in enumerate(mem_obs_dist_keys):
-
-                # print ("Index", index)
-                # print ("Key", key)
-                # print("Mem val", mem_dist[key])
-                if index==0 and obs_dist <= mem_obs_dist[key]:
+                
+                if index==0 and value <= mem_obs_dist[key]:
                     return 1, key, nan
-                elif index== lenL-1 and obs_dist>mem_obs_dist[mem_obs_dist_keys[lenL-1]]:
+                elif index== lenL-1 and value>mem_obs_dist[mem_obs_dist_keys[lenL-1]]:
                     return 1, mem_obs_dist_keys[lenL-1], nan
-                elif obs_dist<=mem_obs_dist[key] and obs_dist>mem_obs_dist[prev_key]:
-                    return ((obs_dist - mem_obs_dist[prev_key]) / (mem_obs_dist[key] - mem_obs_dist[prev_key])), key, prev_key
+                elif value<=mem_obs_dist[key] and value>mem_obs_dist[prev_key]:
+                    return ((value - mem_obs_dist[prev_key]) / (mem_obs_dist[key] - mem_obs_dist[prev_key])), key, prev_key
+                
                 prev_key = key
 
-        def membership_obs_angle():
+        def calculateVelocity(membership_dict):
 
-            pprev_key = None
-            lenLL = len(mem_obs_angle_dev_keys)
+            pointer = 0
 
-            for index, key in enumerate(mem_obs_angle_dev_keys):
+            weightSum = 0
+            linVelSum = 0
+            angVelSum = 0
 
-                # print ("Index", index)
-                # print ("Key", key)
-                # print("Mem val", mem_angle[key])
+            for aKey in mem_obs_dist_keys:
+                for bKey in mem_obs_dist_keys:
+                    for cKey in mem_obs_dist_keys:
+                        
+                        minVal = min(membership_dict[0][aKey], membership_dict[1][bKey], membership_dict[2][cKey])
+                        lin, ang = fuzzy.OAFLC_VelocityValues[pointer]
 
-                if index==0 and obs_angle <= mem_obs_angle_dev[key]:
-                    return 1, key, nan
-                elif index == lenLL-1 and obs_angle > mem_obs_angle_dev[mem_obs_angle_dev_keys[lenLL-1]]:
-                    return 1, mem_obs_angle_dev_keys[lenLL-1], nan
-                elif obs_angle <= mem_obs_angle_dev[key] and obs_angle > mem_obs_angle_dev[pprev_key]:
-                    return ((obs_angle - mem_obs_angle_dev[pprev_key])/float(mem_obs_angle_dev[key] - mem_obs_angle_dev[pprev_key])), key, pprev_key
-                pprev_key = key
+                        if minVal!=0:
+                            weightSum += minVal
+                            linVelSum += minVal*lin
+                            angVelSum += minVal*ang
 
-        mdd_a = membership_obs_dist()
-        maa_a = membership_obs_angle()
+                        pointer += 1
 
-        print ("Membership function for distance for obstacle", mdd_a)
-        print ("Membership function for angle for obstacle", maa_a)
+            return (linVelSum/weightSum, angVelSum/weightSum)
 
-        return mdd_a, maa_a
+        mdd_a = [] 
+        for value in obs_values:
+            membership_weights = {'vn': 0.0, 'n': 0.0, 'f':0.0}
+            w, key, next_key = membership_obs_dist(value)
+            
+            if next_key == nan:
+                membership_weights[key] = w
+            else:
+                membership_weights[key] = w
+                membership_weights[next_key] = 1-w
+
+            mdd_a.append(membership_weights)
+
+        linearVelocity, angularVelocity = calculateVelocity(mdd_a)
+
+        return linearVelocity, angularVelocity
 
     def membership_functions_FUSION(self, weight_tau):
         '''Defining membership functions for behavior fusion of the osbtacle avoidance and the tracking FLC systems'''
@@ -146,6 +185,7 @@ class Movement:
 
         mfw_OAFLC = {'small':0.25, 'medium':0.50, 'large':0.75}
         mfw_OAFLC_keys = ['small', 'medium', 'large']
+
         def calc():
             if weight_tau <= mfw_OAFLC[mfw_OAFLC_keys[0]]:
                 return 1, mfw_OAFLC_keys[0], nan
@@ -176,19 +216,16 @@ class Movement:
         values_final = [ w*a - (1-w)*b for a,b in zip(values_oaflc, values_tflc)]
 
         # Final values of the linear X, linear Y and  angular Z velocities
-        print ("Final values of veloccities and acccelerations going to the TurtleBot", values_final)
+        print ("Final values of velocities and accelerations going to the TurtleBot", values_final)
 
         return values_final
 
 
-if __name__ == '__main__':
+# if __name__ == '__main__':
 
-    obje = Movement((6,9))
-    a, b = obje.membership_functions_TFLC(0.82, -42)
-    c, d = obje.membership_functions_OAFLC(0.79, -7.5)
-    e = obje.membership_functions_FUSION(0.65)
-
-
-
-
-
+#     obje = FuzzyImplementation((6,9))
+    
+#     a, b = obje.membership_functions_TFLC(0.82, -42)
+#     c, d = obje.membership_functions_OAFLC(0.79, -7.5)
+    
+#     e = obje.membership_functions_FUSION(0.65)
