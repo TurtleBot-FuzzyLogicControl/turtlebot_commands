@@ -1,7 +1,7 @@
 # turtlebot_commands
 Setting up various publishers and subscribers for TurtlleBot
 # Launch Turtlebot with  customized world
-In order to launch the turtlebot in world1.world fllow the following steps:
+In order to launch the turtlebot in world1.world follow the following steps:
 
 
 Step 1: Download the world1.world file to the location '/opt/ros/indigo/share/turtlebot_gazebo/worlds'
